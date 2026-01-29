@@ -12,6 +12,7 @@ import ReactFlow, {
     MarkerType
 } from 'reactflow';
 import 'reactflow/dist/style.css';
+import LearningPackModal from './LearningPackModal';
 
 const PlannerDashboard = () => {
     const [topic, setTopic] = useState("");
@@ -70,6 +71,7 @@ const PlannerDashboard = () => {
 
     const [widgetData, setWidgetData] = useState(null);
     const [widgetLoading, setWidgetLoading] = useState(false);
+    const [showLearningPack, setShowLearningPack] = useState(false);
 
     const onNodeClick = async (event, node) => {
         // Only generate for concept nodes, not root or resources
@@ -106,9 +108,20 @@ const PlannerDashboard = () => {
                                 </h3>
                                 {!widgetLoading && <p className="text-xs text-neutral-500">{widgetData?.description}</p>}
                             </div>
-                            <button onClick={closeWidget} className="p-2 hover:bg-neutral-100 rounded-full">
-                                <span className="text-xl">&times;</span>
-                            </button>
+                            <div className="flex items-center gap-3">
+                                {/* Smart Learning Pack Button */}
+                                {!widgetLoading && widgetData && (
+                                    <button
+                                        onClick={() => setShowLearningPack(true)}
+                                        className="bg-purple-600 text-white px-4 py-2 rounded-full text-sm font-bold shadow hover:bg-purple-700 transition flex items-center gap-2"
+                                    >
+                                        <span>🎓</span> Generate Course
+                                    </button>
+                                )}
+                                <button onClick={closeWidget} className="p-2 hover:bg-neutral-100 rounded-full">
+                                    <span className="text-xl">&times;</span>
+                                </button>
+                            </div>
                         </div>
 
                         <div className="flex-1 bg-neutral-100 relative">
@@ -119,7 +132,22 @@ const PlannerDashboard = () => {
                                 </div>
                             ) : (
                                 <iframe
-                                    srcDoc={widgetData?.html_content}
+                                    srcDoc={`
+                                        <!DOCTYPE html>
+                                        <html>
+                                        <head>
+                                            <script src="https://cdn.tailwindcss.com"></script>
+                                            <script src="https://d3js.org/d3.v7.min.js"></script>
+                                            <style>
+                                                body { margin: 0; padding: 20px; font-family: sans-serif; }
+                                                #visualization { width: 100%; height: 100%; min-height: 400px; }
+                                            </style>
+                                        </head>
+                                        <body>
+                                            ${widgetData?.html_content}
+                                        </body>
+                                        </html>
+                                    `}
                                     className="w-full h-full border-none"
                                     title="Interactive Widget"
                                     style={{ background: 'white' }}
@@ -129,6 +157,16 @@ const PlannerDashboard = () => {
                         </div>
                     </div>
                 </div>
+            )}
+
+            {/* Learning Pack Modal (opened from widget) */}
+            {showLearningPack && (
+                <LearningPackModal
+                    isOpen={showLearningPack}
+                    onClose={() => setShowLearningPack(false)}
+                    skillName={widgetData?.name || "Learning Topic"}
+                    context={{ confidence: 50 }}
+                />
             )}
 
             {/* Search Bar */}
