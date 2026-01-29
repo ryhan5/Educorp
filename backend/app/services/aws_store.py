@@ -107,5 +107,35 @@ class AWSStore:
         except ClientError as e:
             print(f"Error saving learning plan: {e}")
 
+    async def get_skills_summary(self, user_id: str) -> str:
+        """
+        Returns a formatted string summary of user's skills for LLM context.
+        Used by the GameEngine to personalize task generation.
+        """
+        try:
+            skills = await self.get_user_graph(user_id)
+            if not skills:
+                return "No skills data available for this user."
+            
+            # Filter to only skill items
+            skill_items = [s for s in skills if s.get('type') == 'skill']
+            
+            if not skill_items:
+                return "No skills data available for this user."
+            
+            summary_lines = []
+            for s in skill_items:
+                summary_lines.append(
+                    f"- {s.get('skill_name', 'Unknown')} "
+                    f"(Confidence: {s.get('confidence_score', 0)}%, "
+                    f"Depth: {s.get('depth_score', 0)}%, "
+                    f"Relevance: {s.get('industry_relevance', 0)}%)"
+                )
+            
+            return "USER SKILL PROFILE:\n" + "\n".join(summary_lines)
+        except Exception as e:
+            print(f"Error getting skills summary: {e}")
+            return "No skills data available for this user."
+
 # Singleton instance
 aws_store = AWSStore()
