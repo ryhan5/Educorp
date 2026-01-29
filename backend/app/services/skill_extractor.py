@@ -1,7 +1,7 @@
 import os
 from typing import List, Optional
 from pydantic import BaseModel, Field
-from langchain_groq import ChatGroq
+# from langchain_groq import ChatGroq # Removed
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
 
@@ -18,18 +18,15 @@ class SkillList(BaseModel):
     skills: List[SkillData]
 
 async def extract_skills_from_text(text: str) -> List[dict]:
-    # Initialize LLM (Ensure GROQ_API_KEY is set in env)
-    api_key = os.getenv("GROQ_API_KEY")
-    if not api_key:
-        print("WARNING: GROQ_API_KEY not found. Using dummy data for fallback.")
-        return [
-            {"skill_name": "Mock Skill 1", "confidence_score": 80, "depth_score": 70, "industry_relevance": 90, "parent_skill": "Mock Parent"},
-            {"skill_name": "Mock Skill 2", "confidence_score": 60, "depth_score": 50, "industry_relevance": 60, "parent_skill": "Mock Parent"}
-        ]
-
-    # Use Groq with Llama 3
-    llm = ChatGroq(model_name="llama-3.3-70b-versatile", temperature=0)
+    # Use AWS Bedrock via Factory
+    from app.services.llm_factory import get_llm
     
+    try:
+        llm = get_llm(temperature=0)
+    except Exception as e:
+        print(f"Error initializing Bedrock: {e}")
+        return []
+
     parser = JsonOutputParser(pydantic_object=SkillList)
 
     prompt = ChatPromptTemplate.from_messages([
@@ -52,5 +49,9 @@ async def extract_skills_from_text(text: str) -> List[dict]:
         })
         return result.get("skills", [])
     except Exception as e:
+        import traceback
+        with open("bedrock_error.log", "a") as f:
+            f.write(f"Error during LLM extraction: {str(e)}\n")
+            f.write(traceback.format_exc() + "\n")
         print(f"Error during LLM extraction: {e}")
         return []

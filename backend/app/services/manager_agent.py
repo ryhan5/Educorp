@@ -1,6 +1,6 @@
 import os
 import json
-from langchain_groq import ChatGroq
+# from langchain_groq import ChatGroq # Removed
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
 from pydantic import BaseModel, Field
@@ -29,15 +29,12 @@ class CodeReview(BaseModel):
 class ManagerAgent:
     def __init__(self):
         try:
-            api_key = os.getenv("GROQ_API_KEY")
-            if not api_key:
-                print("WARNING: GROQ_API_KEY missing. Agent will be lobotomized.")
-                self.llm = None
-            else:
-                self.llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0.7, groq_api_key=api_key)
+            # Use AWS Bedrock via Factory
+            from app.services.llm_factory import get_llm
+            self.llm = get_llm(temperature=0.7)
             
             with open("backend_debug.log", "a") as f:
-                f.write("ManagerAgent initialized successfully.\n")
+                f.write("ManagerAgent initialized successfully with Bedrock.\n")
                 
         except Exception as e:
             with open("backend_debug.log", "a") as f:

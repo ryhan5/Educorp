@@ -1,0 +1,89 @@
+import os
+import boto3
+from botocore.exceptions import ClientError
+from typing import List, Dict, Any
+from dotenv import load_dotenv
+
+# Force load env to ensure keys are present
+load_dotenv(os.path.join(os.getcwd(), ".env"), override=True)
+
+class AWSStore:
+    def __init__(self):
+        self.region = os.getenv("AWS_DEFAULT_REGION", "us-east-1")
+        self.table_name = "educorp_skills"
+        
+        # Initialize DynamoDB Resource
+        self.dynamodb = boto3.resource(
+            'dynamodb',
+            region_name=self.region,
+            aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
+            aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY")
+        )
+        self.table = self.dynamodb.Table(self.table_name)
+
+    async def save_skill(self, user_id: str, skill_data: Dict[str, Any]):
+        """
+        Saves or updates a skill node in the graph.
+        PK: USER#{user_id}
+        SK: SKILL#{skill_name}
+        """
+        try:
+            skill_name = skill_data.get("skill_name")
+            if not skill_name:
+                return
+
+            item = {
+                "pk": f"USER#{user_id}",
+                "sk": f"SKILL#{skill_name}",
+                "skill_name": skill_name,
+                "confidence_score": (skill_data.get("confidence_score") or 0),
+                "depth_score": (skill_data.get("depth_score") or 0),
+                "industry_relevance": (skill_data.get("industry_relevance") or 0),
+                "parent_skill": skill_data.get("parent_skill", "Technical"),
+                "subskills": skill_data.get("subskills", []),
+                "type": "skill"
+            }
+            
+            # Using put_item (Upsert)
+            self.table.put_item(Item=item)
+            print(f"Saved skill: {skill_name}")
+            
+        except ClientError as e:
+            print(f"Error saving skill {skill_data.get('skill_name')}: {e}")
+
+    async def get_user_graph(self, user_id: str) -> List[Dict[str, Any]]:
+        """
+        Retrieves the full skill graph for a user.
+        """
+        try:
+            response = self.table.query(
+                KeyConditionExpression=boto3.dynamodb.conditions.Key('pk').eq(f"USER#{user_id}")
+            )
+            return response.get('Items', [])
+        except ClientError as e:
+            print(f"Error fetching graph for {user_id}: {e}")
+            return []
+
+    async def delete_user_graph(self, user_id: str):
+        """
+        Clears the user's graph (useful for re-scanning).
+        """
+        try:
+            # 1. Get all items
+            items = await self.get_user_graph(user_id)
+            
+            # 2. Batch delete
+            with self.table.batch_writer() as batch:
+                for item in items:
+                    batch.delete_item(
+                        Key={
+                            'pk': item['pk'],
+                            'sk': item['sk']
+                        }
+                    )
+            print(f"Cleared graph for {user_id}")
+        except ClientError as e:
+            print(f"Error clearing graph: {e}")
+
+# Singleton instance
+aws_store = AWSStore()

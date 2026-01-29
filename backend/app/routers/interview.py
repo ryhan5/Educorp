@@ -2,9 +2,10 @@ from fastapi import APIRouter, HTTPException, UploadFile, File
 from app.services.rag_service import initialize_context, get_context
 from app.services.file_parser import parse_file_content
 from app.routers.interview_models import InterviewStartRequest, ChatRequest, ChatResponse, FeedbackResponse
-from langchain_groq import ChatGroq
+# from langchain_groq import ChatGroq # Removed
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
+from app.services.llm_factory import get_llm
 import os
 import random
 
@@ -87,13 +88,10 @@ CORE BEHAVIORS:
 Maintain a professional, conversational tone. Do not repeat yourself.
 """
 
-    api_key = os.getenv("GROQ_API_KEY")
-    if not api_key:
-        print("WARNING: GROQ_API_KEY missing.")
-        # Mock Response
-        return {"response": f"[Mock {persona}]: That's interesting. Tell me more about your experience with that. (Groq Key Missing)"}
+    # api_key = os.getenv("GROQ_API_KEY")
+    # if not api_key: ... (Removed)
 
-    llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0.6, groq_api_key=api_key)
+    llm = get_llm(temperature=0.6)
     
     # Construct history
     history_messages = []
@@ -128,17 +126,9 @@ async def generate_feedback(session_id: str = "demo_session"):
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
         
-    api_key = os.getenv("GROQ_API_KEY")
-    if not api_key:
-        return FeedbackResponse(
-            score=85,
-            readiness_score={"Technical": 80, "Behavioral": 90},
-            strengths=["Clear communication", "Mock Strength"],
-            weaknesses=["Mock Weakness"],
-            summary="Groq Key missing. This is a mock evaluation."
-        )
+    # api_key = os.getenv("GROQ_API_KEY") ... (Removed)
 
-    llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0.3, groq_api_key=api_key)
+    llm = get_llm(temperature=0.3)
     parser = JsonOutputParser(pydantic_object=FeedbackResponse)
     
     prompt = ChatPromptTemplate.from_messages([
