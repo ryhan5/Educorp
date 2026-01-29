@@ -185,9 +185,15 @@ class GameEngine:
         if 'chats' not in member: member['chats'] = []
         member['chats'].append({"sender": "You", "message": message})
         
-        # Get response
+        # Build task context for AI awareness
+        tasks_context = "\n".join([
+            f"- [{t.status.upper()}] {t.title}: {t.description}"
+            for t in self.state.tasks
+        ]) if self.state.tasks else "No tasks assigned yet."
+        
+        # Get response with task awareness
         response = await self.agent.generate_colleague_response(
-            member['name'], member['role'], member['personality'], message
+            member['name'], member['role'], member['personality'], message, tasks_context
         )
         
         # Store response

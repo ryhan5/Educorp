@@ -178,9 +178,14 @@ Output strictly JSON:
             return FollowUpTask(task_title="Next Task", task_description="Continue project work.", manager_comment="Keep it up.")
         return content
 
-    async def generate_colleague_response(self, colleague_name: str, colleague_role: str, colleague_persona: str, message: str) -> str:
-        prompt = f"""You are {colleague_name}, a {colleague_role}. Persona: {colleague_persona}.
+    async def generate_colleague_response(self, colleague_name: str, colleague_role: str, colleague_persona: str, message: str, tasks_context: str = "") -> str:
+        prompt = f"""You are {colleague_name}, a {colleague_role} at EduCorp. Persona: {colleague_persona}.
+
+CURRENT PROJECT TASKS (you are aware of these):
+{tasks_context if tasks_context else "No tasks assigned yet."}
+
 User message: "{message}"
-Reply in character (brief, slack style)."""
+
+Reply in character (brief, slack style). If asked about tasks or work, reference the above task list."""
         
         return invoke_nova_lite(prompt)
