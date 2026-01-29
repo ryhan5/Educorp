@@ -26,6 +26,7 @@ class GameState(BaseModel):
     tasks: List[Task] = []
     logs: List[str] = []
     project_context: str = ""
+    team_members: List[dict] = [] # Store team personas
 
 # In-memory store logic
 # session_id -> GameState
@@ -56,12 +57,21 @@ class GameEngine:
             self.state.project_context = content.project_context
             self.state.logs.append(f"Assigned to Project: {content.project_context}")
             
-            # Initial Email from Agent
+            # Initial Email from Manager
             self._send_email(
                 sender="Manager (Alice)",
                 subject=content.manager_email_subject,
                 body=content.manager_email_body
             )
+
+            # Team Intros
+            self.state.team_members = [t.dict() for t in content.team_members]
+            for member in content.team_members:
+                self._send_email(
+                    sender=f"{member.name} ({member.role})",
+                    subject=member.intro_email_subject,
+                    body=member.intro_email_body
+                )
             
             # Initial Task from Agent
             self.state.tasks.append(Task(
@@ -87,6 +97,11 @@ class GameEngine:
             task_id = payload.get("task_id")
             code = payload.get("code", "")
             await self._handle_task_submission(task_id, code)
+
+        elif action_type == "chat_colleague":
+            member_name = payload.get("member_name")
+            message = payload.get("message")
+            await self._handle_colleague_chat(member_name, message)
 
         return self.state
 
@@ -137,18 +152,47 @@ class GameEngine:
 
         if review.passed:
              task.status = "done"
-             # Maybe generate next task? Leaving simple for now.
+             
+             # Generate Follow-up Task
+             followup = await self.agent.generate_followup_task(task.title, review.feedback)
+             
+             # Create new task
+             new_task_id = str(uuid.uuid4())
+             self.state.tasks.append(Task(
+                 id=new_task_id,
+                 title=followup.task_title,
+                 description=followup.task_description
+             ))
+
              self._send_email(
-                 sender="System",
-                 subject="Task Completed",
-                 body=f"Task '{task.title}' marked as done. Good job. \n\nReviewer Feedback: {review.feedback}"
+                 sender="Manager (Alice)",
+                 subject="Task Approved & Next Steps",
+                 body=f"Good work on '{task.title}'.\n\nReview Feedback: {review.feedback}\n\n{followup.manager_comment}\n\nI've assigned your next task: {followup.task_title}"
              )
         else:
              self._send_email(
-                 sender="System",
-                 subject="Build Failed",
-                 body=f"Your submission for '{task.title}' was rejected.\n\nFeedback: {review.feedback}\n\nTrust Impact: {review.trust_score_change}"
+                 sender="Manager (Alice)",
+                 subject="Code Rejected - Revisions Needed",
+                 body=f"Your submission for '{task.title}' was rejected.\n\nFeedback: {review.feedback}\n\nFix the issues and resubmit."
              )
 
+    async def _handle_colleague_chat(self, member_name, message):
+        # Find member
+        member = next((m for m in self.state.team_members if m['name'] == member_name), None)
+        if not member: return
+
+        # Store user message
+        if 'chats' not in member: member['chats'] = []
+        member['chats'].append({"sender": "You", "message": message})
+        
+        # Get response
+        response = await self.agent.generate_colleague_response(
+            member['name'], member['role'], member['personality'], message
+        )
+        
+        # Store response
+        member['chats'].append({"sender": member['name'], "message": response})
+        self.state.logs.append(f"Chatted with {member_name}")
+
     def get_state(self):
-        return self.state
+         return self.state

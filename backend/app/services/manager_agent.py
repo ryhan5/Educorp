@@ -1,17 +1,23 @@
-import os
 import json
-# from langchain_groq import ChatGroq # Removed
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import JsonOutputParser
+from typing import List, Optional
 from pydantic import BaseModel, Field
+from app.services.bedrock import invoke_nova_pro, invoke_nova_lite
 
 # Define Output Models
+class TeamPersona(BaseModel):
+    name: str
+    role: str
+    personality: str
+    intro_email_subject: str
+    intro_email_body: str
+
 class IntroContent(BaseModel):
     manager_email_subject: str
     manager_email_body: str
     first_task_title: str
     first_task_description: str
     project_context: str
+    team_members: List[TeamPersona]
 
 class EmailReply(BaseModel):
     is_professional: bool
@@ -26,134 +32,155 @@ class CodeReview(BaseModel):
     feedback: str
     trust_score_change: int
 
+class FollowUpTask(BaseModel):
+    task_title: str
+    task_description: str
+    manager_comment: str
+
 class ManagerAgent:
     def __init__(self):
+        # Bedrock client is stateless/module-level, no strict init needed here
+        # but we can log that we are in AWS mode
+        print("ManagerAgent initialized in AWS Bedrock Mode.")
+
+    def _parse_json_response(self, response_text: str, model_class: BaseModel) -> Optional[BaseModel]:
+        """
+        Helper to parse Bedrock JSON output into Pydantic models.
+        """
         try:
-            # Use AWS Bedrock via Factory
-            from app.services.llm_factory import get_llm
-            self.llm = get_llm(temperature=0.7)
-            
-            with open("backend_debug.log", "a") as f:
-                f.write("ManagerAgent initialized successfully with Bedrock.\n")
-                
+            # Find the JSON object in the text (sometimes models add chatty preamble)
+            start = response_text.find('{')
+            end = response_text.rfind('}') + 1
+            if start != -1 and end != -1:
+                json_str = response_text[start:end]
+                data = json.loads(json_str)
+                return model_class(**data)
+            else:
+                print(f"Failed to find JSON in response: {response_text[:100]}...")
+                return None
         except Exception as e:
-            with open("backend_debug.log", "a") as f:
-                f.write(f"CRITICAL ERROR in ManagerAgent __init__: {str(e)}\n")
-            print(f"CRITICAL ERROR in ManagerAgent: {e}")
-            self.llm = None
+            print(f"JSON Parsing Error: {e}")
+            return None
 
     async def generate_onboarding(self) -> IntroContent:
-        with open("backend_debug.log", "a") as f:
-            f.write("Entering generate_onboarding\n")
+        system_prompt = """You are Alice, an Engineering Manager at EduCorp.
+You are professional, slightly demanding, and focused on results.
+1. Invent a realistic, complex software project (e.g. 'FinTech Ledger', 'AI Logistics', 'Cybersecurity Threat Monitor').
+2. Send a welcome email that sets high standards.
+3. Assign a FIRST TASK that is DETAILED. It must include:
+    - Objective
+    - Technical constraints
+    - Expected output format
+    - **Acceptance Criteria**: What defines 'done'?
+4. Create 2 distinct team members (AI Colleagues):
+    - Example: "Bob (Senior Dev) - Grumpy but knowledgeable"
+    - Example: "Sarah (Frontend Lead) - Cheerful but busy"
 
-        if not self.llm:
+Output strictly JSON matching this structure:
+{
+    "manager_email_subject": "str",
+    "manager_email_body": "str",
+    "first_task_title": "str",
+    "first_task_description": "str (markdown allowed)",
+    "project_context": "str",
+    "team_members": [
+        {
+            "name": "str",
+            "role": "str",
+            "personality": "str",
+            "intro_email_subject": "str",
+            "intro_email_body": "str"
+        }
+    ]
+}"""
+        user_prompt = "Generate the onboarding package with team details in JSON."
+        
+        response = invoke_nova_pro(system_prompt, user_prompt)
+        # Handle potential error strings from bedrock wrapper
+        if "Error" in response:
+            print(f"Bedrock Error: {response}")
             return IntroContent(
-                manager_email_subject="Welcome (Offline Mode)",
-                manager_email_body="Groq API key missing. Using fallback.",
-                first_task_title="Setup Config",
-                first_task_description="Add your API Key to .env file.",
-                project_context="Maintenance"
+                manager_email_subject="Welcome (System Error)",
+                manager_email_body="Unable to connect to AWS Bedrock. Please check credentials.",
+                first_task_title="Config Error",
+                first_task_description="System is offline.",
+                project_context="Offline",
+                team_members=[]
             )
 
-        try:
-            parser = JsonOutputParser(pydantic_object=IntroContent)
-            prompt = ChatPromptTemplate.from_messages([
-                ("system", """You are Alice, an Engineering Manager at EduCorp.
-You are professional, slightly demanding, and focused on results.
-1. Invent a realistic software project (e.g. 'Legacy API Migration', 'Cloud Data Lake', 'Internal Dashboard').
-2. Send a welcome email that sets high standards.
-3. Assign a FIRST TASK that is small but specific (e.g. 'Write a script to clean this CSV', 'Fix a specific Regex bug').
-4. Do NOT be overly cheerful. Be corporate."""),
-                ("user", "Generate the onboarding package.\n\n{format_instructions}")
-            ])
-
-            chain = prompt | self.llm | parser
-            result = await chain.ainvoke({"format_instructions": parser.get_format_instructions()})
-            return IntroContent(**result)
-        except Exception as e:
-             print(f"Error generating onboarding: {e}")
+        content = self._parse_json_response(response, IntroContent)
+        if not content:
              return IntroContent(
                 manager_email_subject="Welcome",
                 manager_email_body="Welcome to the team.",
                 first_task_title="System Check",
                 first_task_description="Verify system logs.",
-                project_context="Recovery"
+                project_context="Recovery",
+                team_members=[]
             )
+        return content
 
     async def evaluate_email_reply(self, original_email_body: str, user_reply: str, trust_score: int) -> EmailReply:
-        if not self.llm:
-            return EmailReply(is_professional=True, manager_sentiment="neutral", reply_subject="RE: Reply", reply_body="Got it.", trust_score_change=0, persona_used="Manager")
+        tone = "Professional"
+        if trust_score < 40: tone = "Strict and Skeptical"
+        elif trust_score > 70: tone = "Trusting and Casual"
+
+        system_prompt = f"""You are Alice, Engineering Manager. Trust Score: {trust_score}/100. Tone: {tone}.
+Evaluate the intern's reply. Output strictly JSON:
+{{
+    "is_professional": bool,
+    "manager_sentiment": "positive|neutral|negative",
+    "reply_subject": "str",
+    "reply_body": "str",
+    "trust_score_change": int (-10 to +10),
+    "persona_used": "Manager"
+}}"""
+        user_prompt = f"My Email: {original_email_body}\nIntern Reply: {user_reply}\nGenerate JSON response."
         
-        # Determine Tone based on Trust
-        tone = "Professional and Trusting"
-        if trust_score < 40:
-            tone = "Micromanaging, Skeptical, and Strict. Demand better updates."
-        elif trust_score < 70:
-            tone = "Professional but monitoring closely."
-        else:
-            tone = "Casual and trusting. Brief responses."
-
-        parser = JsonOutputParser(pydantic_object=EmailReply)
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", f"""You are Alice, the Engineering Manager.
-Current Trust Score: {trust_score}/100.
-Your Tone: {tone}
-
-Evaluate the intern's email reply.
-- If they are vague, rude, or late -> Deduct Trust severely. Be harsh.
-- If they are clear, professional, and ownership-driven -> Add Trust. Be approving.
-
-Output 'is_professional', 'manager_sentiment', 'trust_score_change' (-10 to +10), and your 'reply_body'."""),
-            ("user", "My Last Email: {original_email}\nIntern's Reply: {user_reply}\n\nGenerate your counter-reply.\n\n{format_instructions}")
-        ])
-
-        chain = prompt | self.llm | parser
-        try:
-            result = await chain.ainvoke({
-                "original_email": original_email_body, 
-                "user_reply": user_reply,
-                "format_instructions": parser.get_format_instructions()
-            })
-            return EmailReply(**result)
-        except Exception as e:
-            print(f"Error evaluating reply: {e}")
-            return EmailReply(is_professional=True, manager_sentiment="neutral", reply_subject="RE: Update", reply_body="Received.", trust_score_change=0, persona_used="Manager")
+        response = invoke_nova_lite(f"{system_prompt}\n\n{user_prompt}")
+        content = self._parse_json_response(response, EmailReply)
+        
+        if not content:
+            return EmailReply(is_professional=True, manager_sentiment="neutral", reply_subject="RE: Update", reply_body="Received.", trust_score_change=0)
+        return content
 
     async def evaluate_code(self, task_desc: str, code: str, trust_score: int) -> CodeReview:
-        if not self.llm:
-             return CodeReview(passed=True, feedback="Offline mode: Code accepted.", trust_score_change=5)
-
-        # stricter review if trust is low
-        strictness = "Standard"
-        if trust_score < 40:
-            strictness = "EXTREME. Fail them for minor style issues or lack of comments."
+        system_prompt = f"""You are a Senior Code Reviewer. Task: {task_desc}.
+Analyze the code. Output strictly JSON:
+{{
+    "passed": bool,
+    "feedback": "str (constructive feedback)",
+    "trust_score_change": int (-15 to +15)
+}}"""
+        user_prompt = f"Code:\n```python\n{code}\n```\nEvaluate this code."
         
-        parser = JsonOutputParser(pydantic_object=CodeReview)
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", f"""You are a Senior Engineer Code Reviewer.
-Review Strictness: {strictness}
+        response = invoke_nova_pro(system_prompt, user_prompt)
+        content = self._parse_json_response(response, CodeReview)
+        
+        if not content:
+             return CodeReview(passed=True, feedback="Code parsing error, assuming pass.", trust_score_change=0)
+        return content
 
-Task: {task_desc}
+    async def generate_followup_task(self, prev_task_title: str, prev_task_feedback: str) -> FollowUpTask:
+        system_prompt = """You are Alice. Assign the next task.
+Output strictly JSON:
+{
+    "task_title": "str",
+    "task_description": "str (detailed markdown with Context, Objectives, Acceptance Criteria)",
+    "manager_comment": "str"
+}"""
+        user_prompt = f"Previous Task: {prev_task_title}\nFeedback: {prev_task_feedback}\nGenerate next task JSON."
+        
+        response = invoke_nova_pro(system_prompt, user_prompt)
+        content = self._parse_json_response(response, FollowUpTask)
+        
+        if not content:
+            return FollowUpTask(task_title="Next Task", task_description="Continue project work.", manager_comment="Keep it up.")
+        return content
 
-Analyze the Python code below.
-1. Funcationality: Does it solve the problem?
-2. Quality: Variable names, comments, edge cases.
-3. Professionalism: No placeholder 'pass' unless valid.
-
-If it fails: Provide specific, constructive, but firm feedback. Trust -5 to -15.
-If it passes: Provide brief kudos. Trust +5 to +15.
-"""),
-            ("user", "Intern's Code:\n```python\n{code}\n```\n\n{format_instructions}")
-        ])
-
-        chain = prompt | self.llm | parser
-        try:
-            result = await chain.ainvoke({
-                "task_desc": task_desc,
-                "code": code,
-                "format_instructions": parser.get_format_instructions()
-            })
-            return CodeReview(**result)
-        except Exception as e:
-            print(f"Error evaluating code: {e}")
-            return CodeReview(passed=False, feedback="Error evaluating code.", trust_score_change=0)
+    async def generate_colleague_response(self, colleague_name: str, colleague_role: str, colleague_persona: str, message: str) -> str:
+        prompt = f"""You are {colleague_name}, a {colleague_role}. Persona: {colleague_persona}.
+User message: "{message}"
+Reply in character (brief, slack style)."""
+        
+        return invoke_nova_lite(prompt)

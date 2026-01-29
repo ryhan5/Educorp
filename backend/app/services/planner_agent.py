@@ -1,14 +1,11 @@
-import os
+import json
 from typing import List, Optional
-# from app.database import db # Removed for Bedrock migration
+from app.database import db
 from app.models import LearningPath, LearningResource
 from pydantic import BaseModel
-# from langchain_groq import ChatGroq # Removed
-from langchain_community.tools.tavily_search import TavilySearchResults
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import JsonOutputParser
+from app.services.bedrock import invoke_nova_pro, invoke_nova_lite
 
-
+# Models
 class MindMapNode(BaseModel):
     id: str
     label: str
@@ -24,222 +21,125 @@ class MindMapData(BaseModel):
     nodes: List[MindMapNode]
     edges: List[MindMapEdge]
 
-async def generate_mindmap_plan(topic: str) -> MindMapData:
-    mock_data = MindMapData(
-        nodes=[
-            MindMapNode(id="1", label=topic, type="root"),
-            MindMapNode(id="2", label="Basics (Mock)", type="concept"),
-            MindMapNode(id="3", label="Advanced (Mock)", type="concept"),
-            MindMapNode(id="4", label="Official Docs", type="resource", url="https://example.com"),
-        ],
-        edges=[
-            MindMapEdge(id="e1-2", source="1", target="2"),
-            MindMapEdge(id="e1-3", source="1", target="3"),
-            MindMapEdge(id="e2-4", source="2", target="4"),
-        ]
-    )
-
-    api_key = True # Mock check to pass logic flow, assumed handled by aws configure
-    
-    # if not api_key: ... (Removed Groq key check)
-
-    # Agentic Search Step
-
-    # Agentic Search Step
-    tavily_key = os.getenv("TAVILY_API_KEY")
-    search_context = ""
-    if tavily_key:
-        try:
-            search_tool = TavilySearchResults(max_results=3)
-            # Synchronous invoke within async function (LangChain legacy behavior safe here)
-            results = search_tool.invoke(f"guide to learning {topic} roadmap key concepts")
-            search_context = str(results)
-        except Exception:
-            pass
-
-    # Use Bedrock
-    from app.services.llm_factory import get_llm
-    llm = get_llm(temperature=0.7)
-    parser = JsonOutputParser(pydantic_object=MindMapData)
-
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", "You are an AI Curriculum Agent. Create a detailed learning mindmap.\n"
-                   "1. Analyze the Topic.\n"
-                   "2. Break it down into Core Concepts.\n"
-                   "3. For each concept, recommend REAL, specific tutorials/docs (found in Context or from your knowledge).\n"
-                   "Structure: Root -> Concepts -> Resources.\n"
-                   "Return JSON with 'nodes' and 'edges'."),
-        ("user", "Context: {context}\n\nTopic: {topic}\n\n{format_instructions}")
-    ])
-
-    chain = prompt | llm | parser
-
-    try:
-        print(f"DEBUG: invoking Groq for topic: {topic}")
-        result = await chain.ainvoke({
-            "topic": topic,
-            "context": search_context,
-            "format_instructions": parser.get_format_instructions()
-        })
-        print("DEBUG: Groq response received.")
-        return MindMapData(**result)
-    except Exception as e:
-        print(f"CRITICAL ERROR in Mindmap Generation: {e}")
-        return mock_data
-
 class WidgetResponse(BaseModel):
     name: str
     html_content: str
     description: str
 
-async def generate_interactive_widget(topic: str) -> WidgetResponse:
-    print(f"DEBUG: Generating widget for {topic}")
-    api_key = True
-
-    # Use Bedrock
-    from app.services.llm_factory import get_llm
-    llm = get_llm(temperature=0.7)
-    parser = JsonOutputParser(pydantic_object=WidgetResponse)
-
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", """You are a Visualization Expert and Award-Winning Frontend Engineer.
-Your goal is to explain a concept by creating a DEEP, ENGAGING INTERACTIVE WIDGET.
-Don't just show 'text', show 'mechanics'.
-
-### VISUALIZATION STRATEGIES (Use the best one):
-1. **Algorithms (Sorting, Pathfinding)**: Use **Animated Bar Charts** or **Grid Maps**. 
-   - *CRITICAL*: Show the "current state" in RED, "processed" in GREEN. 
-   - animate the transitions (swapping bars) smoothly using CSS `transition: all 0.3s`.
-2. **Data Structures (Trees, Graphs, Lists)**: Use **SVG Nodes & Edges**.
-   - Render circles for nodes, lines for edges.
-   - Highlight the "traversal path" dynamically.
-3. **Systems/Concepts (Docker, API, ML)**: Use **Flow Diagrams**.
-   - Animated particles moving between boxes (e.g., "Request" moving from "Client" to "Server").
-
-### REQUIREMENTS (JSON Output):
-- name: Title.
-- html_content: COMPLETE, SELF-CONTAINED HTML/JS.
-    - **Libraries**: TailwindCSS (CDN) is REQUIRED for layout.
-    - **No External Logic**: All JS must be inside the `<script>`.
-    - **UI Layout**:
-        1. **Top**: Visualization Canvas (White bg, rounded corners, shadow).
-        2. **Middle**: Controls (Play, Pause, Step Next, Reset).
-        3. **Bottom**: **Explanation Console** (Typewriter text explaining exactly what is happening in this specific step).
-    - **Code Quality**: Use `async/await` for sleep functions to visualize steps (e.g. `await new Promise(r => setTimeout(r, 500))`).
-- description: Brief summary.
-"""),
-        ("user", "Create a World-Class Interactive Widget for: {topic}\n\n{format_instructions}")
-    ])
-
-    chain = prompt | llm | parser
-
+def _parse_planner_json(text: str, model_class):
     try:
-        result = await chain.ainvoke({
-            "topic": topic,
-            "format_instructions": parser.get_format_instructions()
-        })
-        return WidgetResponse(**result)
+        start = text.find('{')
+        end = text.rfind('}') + 1
+        if start != -1 and end != -1:
+            json_str = text[start:end]
+            data = json.loads(json_str)
+            return model_class(**data)
+        return None
     except Exception as e:
-        print(f"Widget Generation Failed: {e}")
-        return WidgetResponse(
-            name="Generation Failed",
-            html_content=f"<div style='color:red'>Failed to generate widget: {str(e)}</div>",
-            description="Error occurred during generation."
+        print(f"JSON Parse Error: {e}")
+        return None
+
+async def generate_mindmap_plan(topic: str) -> MindMapData:
+    system_prompt = """You are an AI Curriculum Agent. Create a detailed learning mindmap.
+Structure: Root -> Concepts -> Resources.
+Output strictly JSON:
+{
+    "nodes": [{"id": "str", "label": "str", "type": "root|concept|resource", "url": "opt_str"}],
+    "edges": [{"id": "str", "source": "str", "target": "str"}]
+}"""
+    user_prompt = f"Topic: {topic}"
+    
+    response = invoke_nova_pro(system_prompt, user_prompt)
+    if "Error" in response:
+        print(f"Bedrock Error: {response}")
+        # Return fallback
+        return MindMapData(
+            nodes=[MindMapNode(id="1", label=f"Error: {topic}", type="root")],
+            edges=[]
         )
 
+    data = _parse_planner_json(response, MindMapData)
+    if not data:
+        return MindMapData(
+            nodes=[MindMapNode(id="1", label=f"Plan: {topic}", type="root")],
+            edges=[]
+        )
+    return data
+
+async def generate_interactive_widget(topic: str) -> WidgetResponse:
+    print(f"DEBUG: Generating widget for {topic}")
+    
+    system_prompt = """You are a Visualization Expert. Create a DEEP, ENGAGING INTERACTIVE WIDGET.
+Strategies:
+1. Algorithms: Animated Bar Charts.
+2. Data Structures: SVG Nodes.
+3. Systems: Flow Diagrams.
+
+REQUIREMENTS:
+- name: Title
+- html_content: COMPLETE HTML/JS with TailwindCSS. NO EXTERNAL JS FILES.
+- description: Summary.
+Output strictly JSON."""
+    
+    user_prompt = f"Topic: {topic}"
+    
+    response = invoke_nova_lite(f"{system_prompt}\n\n{user_prompt}")
+    
+    data = _parse_planner_json(response, WidgetResponse)
+    
+    if not data:
+        return WidgetResponse(
+            name="Generation Failed",
+            html_content="<div class='p-4 text-red-500'>Failed to generate widget.</div>",
+            description="Error."
+        )
+    return data
+
 async def generate_learning_plan() -> List[LearningPath]:
-    # 1. Fetch skills from DB (Mocking this)
-    # skills_cursor = db.skill_nodes.find({})
-    skills = [] # await skills_cursor.to_list(length=100)
+    # 1. Fetch skills from DB
+    skills_cursor = db.skill_nodes.find({})
+    skills = await skills_cursor.to_list(length=100)
     
     if not skills:
-        skills = [{"skill_name": "Python (Demo)", "confidence_score": 30}]
+        return []
 
-    # 2. Identify Weak Skills (Confidence < 70)
     weak_skills = [s for s in skills if s.get("confidence_score", 0) < 70]
-    
     if not weak_skills:
-        weak_skills = [{"skill_name": "Advanced System Design", "confidence_score": 50}]
+        weak_skills = [{"skill_name": "Advanced Architecture", "confidence_score": 50}]
 
     plans = []
-    
-    # Initialize Tools
-    tavily_key = os.getenv("TAVILY_API_KEY")
-    search_tool = None
-    if tavily_key:
-        search_tool = TavilySearchResults(max_results=3)
-
-    # Use Groq for Planner logic as well
-    # Use Bedrock for Planner logic as well
-    from app.services.llm_factory import get_llm
-    llm = get_llm(temperature=0.7)
-    
-    parser = JsonOutputParser(pydantic_object=LearningPath)
-
-    # New Agentic Persona
-    system_prompt = """You are an Agentic Learning Planner.
-Your role is to function as a personalized career manager, not a static recommendation engine.
-Unlike fixed roadmaps, you must continuously reason, plan, monitor, and adapt a learner’s journey based on real performance data.
-
-CORE RESPONSIBILITIES:
-1. DEFINE CAREER GOALS: Establish clear objectives based on skill gaps.
-2. BREAK DOWN SKILLS: Deconstruct goals into atomic micro-skills and specific tasks.
-3. ASSIGN LEARNING & TASKS: Select the most effective resources and REAL-WORLD tasks. Avoid passive learning.
-
-AGENT BEHAVIOR:
-- Adaptive: Adjusts pace based on confidence score.
-- Goal-Oriented: Every step maps to career objectives.
-- Performance-Driven: Recommendations are based on potential for measurable improvement.
-
-Output must strictly follow the JSON schema provided.
-- 'reasoning': Explain WHY this path and these specific resources were chosen based on the confidence level.
-- 'resources': A list of mixed tutorials, documentation, and specific PRACTICAL TASKS (labeled as 'task' in title if possible).
-"""
 
     for skill in weak_skills:
         skill_name = skill["skill_name"]
         confidence = skill["confidence_score"]
         
-        # 3. Agentic Search
-        search_results = []
-        if search_tool:
-            try:
-                search_results = search_tool.invoke(f"best advanced interactive tutorial for {skill_name} 2024 with projects")
-            except Exception as e:
-                print(f"Search failed for {skill_name}: {e}")
-        
-        context_str = str(search_results) if search_results else "No external search results. Use best known resources."
+        system_prompt = """You are an Agentic Learning Planner.
+CORE RESPONSIBILITIES:
+1. DEFINE CAREER GOALS.
+2. BREAK DOWN SKILLS.
+3. ASSIGN TASKS.
 
-        # 4. Generate Plan via LLM
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", system_prompt),
-            ("user", "Context: {context}\n\nSkill: {skill_name}\nCurrent Confidence: {confidence}/100\n\n{format_instructions}")
-        ])
+Output strictly JSON:
+{
+    "skill_name": "str",
+    "reasoning": "str",
+    "resources": [{"title": "str", "url": "str", "type": "video|article|task"}],
+    "estimated_hours": int
+}"""
+        user_prompt = f"Skill: {skill_name}\nConfidence: {confidence}"
         
-        chain = prompt | llm | parser
+        response = invoke_nova_pro(system_prompt, user_prompt)
         
+        # Manually parse since LearningPath logic might check DB insertion
         try:
-            plan_data = await chain.ainvoke({
-                "skill_name": skill_name,
-                "confidence": confidence,
-                "context": context_str,
-                "format_instructions": parser.get_format_instructions()
-            })
-            
-            # Convert and Validate
-            plan = LearningPath(**plan_data)
-            plans.append(plan)
-            
-            # Save to DB (Removed)
-            # await db.learning_paths.insert_one(plan.dict())
-            
+            start = response.find('{')
+            end = response.rfind('}') + 1
+            if start != -1:
+                data = json.loads(response[start:end])
+                plan = LearningPath(**data)
+                plans.append(plan)
+                await db.learning_paths.insert_one(plan.dict())
         except Exception as e:
-            print(f"Failed to generate plan for {skill_name}: {e}")
-            # Fallback to simple plan if LLM fails
-            plans.append(LearningPath(
-                skill_name=skill_name,
-                reasoning=f"Agent generation failed: {str(e)}. Using fallback.",
-                resources=[LearningResource(title=f"Documentation for {skill_name}", url=f"https://www.google.com/search?q={skill_name}")]
-            ))
-
+            print(f"Plan Generation Error for {skill_name}: {e}")
+            
     return plans

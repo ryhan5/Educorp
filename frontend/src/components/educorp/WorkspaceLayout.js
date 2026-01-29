@@ -49,12 +49,18 @@ const WorkspaceLayout = ({ children, activeApp, onSwitchApp, gameState }) => {
                     ))}
 
                     <div className="mt-8 text-xs font-semibold text-neutral-500 px-3 mb-2 uppercase tracking-wider">System</div>
-                    <button className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-neutral-200/50 text-neutral-500 hover:text-black transition-colors">
-                        <PieChart size={20} className="opacity-70" />
+                    <button
+                        onClick={() => onSwitchApp('analytics')}
+                        className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 ${activeApp === 'analytics' ? 'bg-white text-black shadow-sm ring-1 ring-neutral-200' : 'hover:bg-neutral-200/50 text-neutral-500 hover:text-black'}`}
+                    >
+                        <PieChart size={20} className={activeApp === 'analytics' ? 'text-black' : 'opacity-70'} />
                         <span className="text-sm font-medium">Analytics</span>
                     </button>
-                    <button className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-neutral-200/50 text-neutral-500 hover:text-black transition-colors">
-                        <Users size={20} className="opacity-70" />
+                    <button
+                        onClick={() => onSwitchApp('team')}
+                        className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 ${activeApp === 'team' ? 'bg-white text-black shadow-sm ring-1 ring-neutral-200' : 'hover:bg-neutral-200/50 text-neutral-500 hover:text-black'}`}
+                    >
+                        <Users size={20} className={activeApp === 'team' ? 'text-black' : 'opacity-70'} />
                         <span className="text-sm font-medium">Team</span>
                     </button>
 

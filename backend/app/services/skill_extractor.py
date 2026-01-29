@@ -1,9 +1,7 @@
-import os
+import json
 from typing import List, Optional
 from pydantic import BaseModel, Field
-# from langchain_groq import ChatGroq # Removed
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import JsonOutputParser
+from app.services.bedrock import invoke_nova_pro
 
 # Define the structure for a single skill
 class SkillData(BaseModel):
@@ -13,45 +11,58 @@ class SkillData(BaseModel):
     industry_relevance: int = Field(description="Estimated industry demand/relevance from 0 (obsolete) to 100 (high demand)")
     parent_skill: Optional[str] = Field(description="The direct parent category or skill, e.g., 'Backend Development' for 'Python'. logic: infer likely parent if not explicit.", default=None)
 
-# Define the list structure
 class SkillList(BaseModel):
     skills: List[SkillData]
 
+def _parse_skills_json(text: str) -> List[dict]:
+    try:
+        start = text.find('{')
+        end = text.rfind('}') + 1
+        if start != -1 and end != -1:
+            json_str = text[start:end]
+            data = json.loads(json_str)
+            # Normalize list logic
+            if "skills" in data:
+                return data["skills"]
+            return [] # Fallback
+        return []
+    except Exception as e:
+        print(f"JSON Parse Error in Skills: {e}")
+        return []
+
 async def extract_skills_from_text(text: str) -> List[dict]:
-    # Use AWS Bedrock via Factory
-    from app.services.llm_factory import get_llm
+    """
+    Extracts skills using Amazon Nova Pro.
+    """
     
-    try:
-        llm = get_llm(temperature=0)
-    except Exception as e:
-        print(f"Error initializing Bedrock: {e}")
+    system_prompt = """You are an expert technical recruiter. 
+Extract a structured list of technical skills from the user's text.
+Analyze the context to determine:
+- Confidence Level (0-100)
+- Depth Score (0-100)
+- Industry Relevance (0-100)
+- Parent Skill (Logical hierarchy)
+
+Output strictly JSON with this schema:
+{
+    "skills": [
+        {
+            "skill_name": "str",
+            "confidence_score": int,
+            "depth_score": int,
+            "industry_relevance": int,
+            "parent_skill": "str"
+        }
+    ]
+}"""
+    
+    user_prompt = f"Analyze the following text from Resume/GitHub/Courses:\n{text}"
+
+    response = invoke_nova_pro(system_prompt, user_prompt)
+    
+    if "Error" in response:
+        print(f"Bedrock Error in Skill Extractor: {response}")
         return []
 
-    parser = JsonOutputParser(pydantic_object=SkillList)
-
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", "You are an expert technical recruiter and resume analyzer. Extract a structured list of technical skills from the provided text. \n"
-                   "Analyze the context to determine:\n"
-                   "- Confidence Level (how much evidence of mastery)\n"
-                   "- Depth Score (complexity of usage)\n"
-                   "- Industry Relevance (current market demand)\n"
-                   "- Parent Skill (create a logical hierarchy, grouping specific tools under broader categories like 'Frontend', 'Cloud', 'Data Science', etc.)\n"
-                   "Output purely JSON."),
-        ("user", "{format_instructions}\n\nAnalyze the following text from Resume/GitHub/Courses:\n{text}")
-    ])
-
-    chain = prompt | llm | parser
-
-    try:
-        result = await chain.ainvoke({
-            "text": text,
-            "format_instructions": parser.get_format_instructions()
-        })
-        return result.get("skills", [])
-    except Exception as e:
-        import traceback
-        with open("bedrock_error.log", "a") as f:
-            f.write(f"Error during LLM extraction: {str(e)}\n")
-            f.write(traceback.format_exc() + "\n")
-        print(f"Error during LLM extraction: {e}")
-        return []
+    skills = _parse_skills_json(response)
+    return skills

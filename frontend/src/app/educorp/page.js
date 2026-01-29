@@ -6,13 +6,16 @@ import WorkspaceLayout from '@/components/educorp/WorkspaceLayout';
 import EmailClient from '@/components/educorp/apps/EmailClient';
 import CodeEditor from '@/components/educorp/apps/CodeEditor';
 import TaskBoard from '@/components/educorp/apps/TaskBoard';
+import TeamView from '@/components/educorp/apps/TeamView';
+import AnalyticsDashboard from '@/components/educorp/apps/AnalyticsDashboard';
 
 const EduCorpPage = () => {
     const [gameState, setGameState] = useState({
         emails: [],
         tasks: [],
         day: 1,
-        trust_score: 50
+        trust_score: 50,
+        team_members: []
     });
     const [activeApp, setActiveApp] = useState('email');
     const [code, setCode] = useState("# Fix the bug in auth.py\n\ndef login(username, password):\n    # TODO: Implement secure login\n    pass");
@@ -63,6 +66,18 @@ const EduCorpPage = () => {
         } catch (e) { console.error(e); }
     };
 
+    const handleTeamChat = async (memberName, message) => {
+        try {
+            await axios.post('http://localhost:8000/api/simulator/action', {
+                session_id: "demo_sim",
+                action_type: "chat_colleague",
+                payload: { member_name: memberName, message }
+            });
+            fetchState();
+        } catch (e) { console.error(e); }
+    };
+
+
     const [loading, setLoading] = useState(false);
     const hasStarted = gameState.emails.length > 0 || gameState.tasks.length > 0;
 
@@ -99,9 +114,9 @@ const EduCorpPage = () => {
                     <p className="text-slate-500 mb-8">
                         The AI Manager is generating your onboarding tasks. Please wait.
                     </p>
-                    
+
                     <div className="w-full bg-gray-200 rounded-full h-2.5 dark:bg-gray-700 mb-4 overflow-hidden">
-                         <div className="bg-black h-2.5 rounded-full animate-progress" style={{width: '45%'}}></div>
+                        <div className="bg-black h-2.5 rounded-full animate-progress" style={{ width: '45%' }}></div>
                     </div>
 
                     <p className="text-xs text-slate-400">
@@ -146,6 +161,19 @@ const EduCorpPage = () => {
             {activeApp === 'kanban' && (
                 <TaskBoard
                     tasks={gameState.tasks}
+                />
+            )}
+
+            {activeApp === 'team' && (
+                <TeamView
+                    members={gameState.team_members || []}
+                    onChat={handleTeamChat}
+                />
+            )}
+
+            {activeApp === 'analytics' && (
+                <AnalyticsDashboard
+                    gameState={gameState}
                 />
             )}
         </WorkspaceLayout>
