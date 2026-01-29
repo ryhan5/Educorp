@@ -120,24 +120,20 @@ const EduCorpPage = () => {
                         The AI Manager is generating your onboarding tasks. Please wait.
                     </p>
 
-                    <div className="w-full bg-gray-200 rounded-full h-2.5 dark:bg-gray-700 mb-4 overflow-hidden">
-                        <div className="bg-black h-2.5 rounded-full animate-progress" style={{ width: '45%' }}></div>
+                    <div className="w-full bg-gray-200 rounded-full h-2.5 mb-4 overflow-hidden">
+                        <div
+                            className="bg-black h-2.5 rounded-full"
+                            style={{
+                                width: '70%',
+                                animation: 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite'
+                            }}
+                        />
                     </div>
 
                     <p className="text-xs text-slate-400">
                         *This typically takes 5-10 seconds.
                     </p>
                 </div>
-                <style jsx>{`
-                    @keyframes progress {
-                        0% { width: 0%; }
-                        50% { width: 70%; }
-                        100% { width: 100%; }
-                    }
-                    .animate-progress {
-                        animation: progress 2s infinite ease-in-out;
-                    }
-                `}</style>
             </div>
         );
     }
