@@ -75,11 +75,13 @@ You are professional, slightly demanding, and focused on results.
 {skills_section}
 1. Invent a realistic, complex software project (e.g. 'FinTech Ledger', 'AI Logistics', 'Cybersecurity Threat Monitor').
 2. Send a welcome email that sets high standards.
-3. Assign a FIRST TASK that is DETAILED and RELEVANT TO THE INTERN'S SKILLS. It must include:
-    - Objective
-    - Technical constraints
-    - Expected output format
-    - **Acceptance Criteria**: What defines 'done'?
+3. Assign a FIRST TASK that is DETAILED and RELEVANT TO THE INTERN'S SKILLS (reference their specific skills if available). It must include:
+    - **Objective**: Clear goal.
+    - **Technical Constraints**: Specific libraries, patterns (e.g., MVC), or tools to use.
+    - **Expected Output Format**: What to deliver (e.g., GitHub repo link, PDF report).
+    - **Acceptance Criteria**: 3-4 bullet points defining 'done'.
+    - **Hint**: A small tip to help them get started.
+
 4. Create 2 distinct team members (AI Colleagues):
     - Example: "Bob (Senior Dev) - Grumpy but knowledgeable"
     - Example: "Sarah (Frontend Lead) - Cheerful but busy"
@@ -89,7 +91,7 @@ Output strictly JSON matching this structure:
     "manager_email_subject": "str",
     "manager_email_body": "str",
     "first_task_title": "str",
-    "first_task_description": "str (markdown allowed)",
+    "first_task_description": "str (markdown allowed - use headers and bullet points)",
     "project_context": "str",
     "team_members": [
         {{

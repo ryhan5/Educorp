@@ -79,10 +79,14 @@ const EduCorpPage = () => {
 
 
     const [loading, setLoading] = useState(false);
-    const hasStarted = gameState.emails.length > 0 || gameState.tasks.length > 0;
+    const startInitiated = React.useRef(false);
+    const hasStarted = gameState.emails.length > 0 || gameState.tasks.length > 0 || gameState.is_loading;
 
     const handleStart = async () => {
+        if (startInitiated.current) return;
+        startInitiated.current = true;
         setLoading(true);
+
         try {
             await axios.post('http://localhost:8000/api/simulator/start', {}, {
                 params: { session_id: "demo_sim" }
@@ -90,6 +94,7 @@ const EduCorpPage = () => {
             await fetchState();
         } catch (e) {
             console.error("Failed to start", e);
+            startInitiated.current = false; // Reset on error
             alert("Failed to start simulation. Check backend console.");
         } finally {
             setLoading(false);
@@ -98,7 +103,7 @@ const EduCorpPage = () => {
 
     // Auto-start simulation logic
     useEffect(() => {
-        if (!hasStarted && !loading) {
+        if (!hasStarted && !loading && !startInitiated.current) {
             handleStart();
         }
     }, [hasStarted, loading]);

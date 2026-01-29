@@ -28,6 +28,7 @@ class GameState(BaseModel):
     logs: List[str] = []
     project_context: str = ""
     team_members: List[dict] = [] # Store team personas
+    is_loading: bool = False
 
 # In-memory store logic
 # session_id -> GameState
@@ -42,13 +43,25 @@ class GameEngine:
         self.agent = ManagerAgent()
 
     async def start_game(self):
+        # Prevent simultaneous starts
+        if self.state.is_loading:
+            return self.state
+            
+        print(f"Starting game for session {self.session_id}, existing state has {len(self.state.emails)} emails")
+        
+        # Mark as loading but KEEP existing state content for now
+        self.state.is_loading = True
+        games[self.session_id] = self.state 
+        
         try:
-            self.state = GameState() # Reset
-            self.state.logs.append("Booting EduCorp OS...")
+            # Create a fresh state object for the new game but don't swap it in yet
+            new_state = GameState()
+            new_state.is_loading = True
+            new_state.logs.append("Booting EduCorp OS...")
             
             # Fetch user skills from Skill Twin (DynamoDB)
             skills_context = await aws_store.get_skills_summary(user_id="demo_user")
-            self.state.logs.append("Loaded Skill Profile from Digital Twin...")
+            new_state.logs.append("Loaded Skill Profile from Digital Twin...")
             
             # Agentic Onboarding with skill context
             with open("backend_debug.log", "a") as f:
@@ -59,37 +72,46 @@ class GameEngine:
             with open("backend_debug.log", "a") as f:
                 f.write(f"GameEngine: Onboarding content received: {content}\n")
 
-            self.state.project_context = content.project_context
-            self.state.logs.append(f"Assigned to Project: {content.project_context}")
+            new_state.project_context = content.project_context
+            new_state.logs.append(f"Assigned to Project: {content.project_context}")
             
             # Initial Email from Manager
-            self._send_email(
+            email = Email(
+                id=str(uuid.uuid4()),
                 sender="Manager (Alice)",
                 subject=content.manager_email_subject,
                 body=content.manager_email_body
             )
+            new_state.emails.append(email)
 
             # Team Intros
-            self.state.team_members = [t.dict() for t in content.team_members]
+            new_state.team_members = [t.dict() for t in content.team_members]
             for member in content.team_members:
-                self._send_email(
+                 email = Email(
+                    id=str(uuid.uuid4()),
                     sender=f"{member.name} ({member.role})",
                     subject=member.intro_email_subject,
                     body=member.intro_email_body
                 )
+                 new_state.emails.insert(0, email) # Newer on top
             
             # Initial Task from Agent
-            self.state.tasks.append(Task(
+            new_state.tasks.append(Task(
                 id=str(uuid.uuid4()),
                 title=content.first_task_title,
                 description=content.first_task_description
             ))
             
+            # Finalize: Swap the new state in and turn off loading
+            new_state.is_loading = False
+            self.state = new_state
             games[self.session_id] = self.state
+            
             return self.state
         except Exception as e:
             with open("backend_debug.log", "a") as f:
                 f.write(f"CRITICAL ERROR in GameEngine.start_game: {str(e)}\n")
+            self.state.is_loading = False # Reset on error
             raise e
 
     async def process_action(self, action_type: str, payload: dict):
