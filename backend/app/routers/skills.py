@@ -1,8 +1,10 @@
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from typing import Optional
-from app.database import db
+# from app.database import db # Removed for Bedrock migration
+from app.services.aws_store import aws_store
 from app.services.skill_extractor import extract_skills_from_text
 from app.services.file_parser import parse_file_content
+from app.services.github_extractor import fetch_github_summary
 import math
 
 router = APIRouter()
@@ -26,7 +28,9 @@ async def analyze_profile(
         content += f"Uploaded Resume ({file.filename}):\n{parsed_text}\n"
 
     if github_url:
-         content += f" [GitHub Profile: {github_url}]\n"
+         # Fetch real data
+         gh_summary = await fetch_github_summary(github_url)
+         content += f"\n{gh_summary}\n"
     
     if course_history:
         content += f"Course History: {course_history}\n"
@@ -43,7 +47,9 @@ async def analyze_profile(
     if not extracted_skills:
         raise HTTPException(status_code=400, detail="Could not extract skills from the provided content.")
 
-    await db.skill_nodes.delete_many({}) 
+    # await db.skill_nodes.delete_many({}) # Removed DB Logic 
+    # Continuous Update: DO NOT clear the graph. We want to Upsert/Merge.
+    # await aws_store.delete_user_graph(user_id="demo_user") # REMOVED for Digital Twin persistence
     
     nodes = []
     edges = []
@@ -161,14 +167,20 @@ async def analyze_profile(
                 "style": {"stroke": "#e5e5e5"}
             })
 
-            # Save to DB
-            await db.skill_nodes.insert_one({
-                "skill_name": skill["skill_name"],
-                "confidence_score": skill["confidence_score"],
-                "depth_score": skill["depth_score"],
-                "industry_relevance": skill.get("industry_relevance", 0),
-                "parent_skill": category
-            })
+            # Save to DB (DynamoDB)
+            await aws_store.save_skill(
+                user_id="demo_user", # Hardcoded for hackathon demo
+                skill_data={
+                    "skill_name": skill["skill_name"],
+                    "confidence_score": skill["confidence_score"],
+                    "depth_score": skill["depth_score"],
+                    "industry_relevance": skill.get("industry_relevance", 0),
+                    "parent_skill": category,
+                    "subskills": [] # Add logic for subskills if available
+                }
+            )
+
+            # await db.skill_nodes.insert_one({ ... }) # Removed
 
     return {
         "message": "Analysis complete",
