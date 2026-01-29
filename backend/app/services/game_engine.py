@@ -3,6 +3,7 @@ from typing import List, Optional, Dict
 from pydantic import BaseModel
 import random
 from app.services.manager_agent import ManagerAgent
+from app.services.aws_store import aws_store
 
 # Models
 class Email(BaseModel):
@@ -45,11 +46,15 @@ class GameEngine:
             self.state = GameState() # Reset
             self.state.logs.append("Booting EduCorp OS...")
             
-            # Agentic Onboarding
-            with open("backend_debug.log", "a") as f:
-                f.write("GameEngine: Calling generate_onboarding\n")
+            # Fetch user skills from Skill Twin (DynamoDB)
+            skills_context = await aws_store.get_skills_summary(user_id="demo_user")
+            self.state.logs.append("Loaded Skill Profile from Digital Twin...")
             
-            content = await self.agent.generate_onboarding()
+            # Agentic Onboarding with skill context
+            with open("backend_debug.log", "a") as f:
+                f.write(f"GameEngine: Calling generate_onboarding with skills: {skills_context[:100]}...\n")
+            
+            content = await self.agent.generate_onboarding(skills_context=skills_context)
             
             with open("backend_debug.log", "a") as f:
                 f.write(f"GameEngine: Onboarding content received: {content}\n")

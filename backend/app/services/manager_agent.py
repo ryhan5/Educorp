@@ -62,12 +62,20 @@ class ManagerAgent:
             print(f"JSON Parsing Error: {e}")
             return None
 
-    async def generate_onboarding(self) -> IntroContent:
-        system_prompt = """You are Alice, an Engineering Manager at EduCorp.
+    async def generate_onboarding(self, skills_context: str = "") -> IntroContent:
+        skills_section = ""
+        if skills_context:
+            skills_section = f"""
+IMPORTANT: The intern has the following skill profile. Tailor the first task to leverage and challenge these skills:
+{skills_context}
+"""
+        
+        system_prompt = f"""You are Alice, an Engineering Manager at EduCorp.
 You are professional, slightly demanding, and focused on results.
+{skills_section}
 1. Invent a realistic, complex software project (e.g. 'FinTech Ledger', 'AI Logistics', 'Cybersecurity Threat Monitor').
 2. Send a welcome email that sets high standards.
-3. Assign a FIRST TASK that is DETAILED. It must include:
+3. Assign a FIRST TASK that is DETAILED and RELEVANT TO THE INTERN'S SKILLS. It must include:
     - Objective
     - Technical constraints
     - Expected output format
@@ -77,22 +85,22 @@ You are professional, slightly demanding, and focused on results.
     - Example: "Sarah (Frontend Lead) - Cheerful but busy"
 
 Output strictly JSON matching this structure:
-{
+{{
     "manager_email_subject": "str",
     "manager_email_body": "str",
     "first_task_title": "str",
     "first_task_description": "str (markdown allowed)",
     "project_context": "str",
     "team_members": [
-        {
+        {{
             "name": "str",
             "role": "str",
             "personality": "str",
             "intro_email_subject": "str",
             "intro_email_body": "str"
-        }
+        }}
     ]
-}"""
+}}"""
         user_prompt = "Generate the onboarding package with team details in JSON."
         
         response = invoke_nova_pro(system_prompt, user_prompt)
